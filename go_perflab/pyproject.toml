@@ -1,0 +1,18 @@
+[project]
+name = "go-perflab"
+version = "0.1.0"
+description = "Go performance-tuning environment (OpenEnv)"
+requires-python = ">=3.11"
+dependencies = [
+  "openenv-core",
+  "fastapi",
+  "uvicorn",
+  "openai",
+]
+
+[project.scripts]
+server = "server.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

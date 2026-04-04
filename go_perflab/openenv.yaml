@@ -1,0 +1,18 @@
+name: go-perflab
+version: "0.1.0"
+description: Go performance-tuning environment (OpenEnv)
+entrypoint: server.app:app
+environment:
+  action_type: GoPerfAction
+  observation_type: GoPerfObservation
+  state_type: GoPerfState
+tasks:
+  - id: easy
+    title: Baseline cleanup
+    goal: Reduce allocations with simple refactors while keeping tests green.
+  - id: medium
+    title: Common patterns
+    goal: Apply multiple goperf.dev patterns to improve two benchmarks.
+  - id: hard
+    title: Deep tuning
+    goal: Combine escape analysis and perf tooling to improve hot paths.
