@@ -14,7 +14,7 @@ from models import GoPerfAction
 from tasks import list_tasks, TaskConfig
 
 
-OPEN_API_KEY = os.getenv("HF_TOKEN")  # Required by submission
+OPEN_API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")  # Required by submission
 OPEN_API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")  # Required by submission
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")  # Required by submission
 ENV_BASE_URL = os.getenv("OPENENV_BASE_URL", "http://localhost:8000")  # OpenEnv server

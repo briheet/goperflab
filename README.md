@@ -1,3 +1,17 @@
+---
+title: GoPerfLab
+emoji: "⚙️"
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 8000
+base_path: /web
+tags:
+  - openenv
+  - golang
+  - benchmark
+---
+
 # GoPerfLab (OpenEnv)
 
 GoPerfLab is a real-world environment for Go performance tuning with typed
