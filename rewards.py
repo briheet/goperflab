@@ -23,10 +23,10 @@ def compute_reward(
     components["delta_vs_prev_best"] = delta_prev
 
     base_reward = 0.7 * delta_base + 0.3 * delta_prev
-    if base_reward > 2.0:
-        base_reward = 2.0
-    if base_reward < -1.0:
-        base_reward = -1.0
+    if base_reward > 1.0:
+        base_reward = 1.0
+    if base_reward < 0.0:
+        base_reward = 0.0
     components["speedup_reward"] = base_reward
 
     penalty = 0.0

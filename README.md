@@ -2,10 +2,13 @@
 
 GoPerfLab is a real-world environment for Go performance tuning with typed
 OpenEnv models, deterministic graders, and three task tiers (easy/medium/hard).
+One of the important reasons to build this was to add this in my developer workflow.
+As a engineer working on trading/ticketing bots in golang, i tends to be hard and
+time consuming to do perfing, benching, profiling. Hence ended up writing this to asist me.
 
 ## Environment overview
 
-GoPerfLab simulates the developer workflow of diagnosing and improving Go
+GoPerfLab simulates the developer workflow of diagnosing and improving Golang
 performance. Agents interact by running benchmarks, performing escape/perf
 analysis, and applying patches or build flags. Rewards are based on performance
 improvement and correctness.
@@ -17,7 +20,7 @@ Tasks:
 
 The server seeds each episode workspace with the bundled Go repo at
 `go-bench-repo/` and initializes a local git history, so agents can run git
-and benchmarks immediately.
+patches and benchmarks immediately.
 
 ## Episode structure
 

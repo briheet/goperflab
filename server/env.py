@@ -2,6 +2,9 @@ import subprocess
 import shutil
 import tempfile
 import uuid
+import base64
+import io
+import tarfile
 from pathlib import Path
 from typing import Optional
 import re
@@ -77,6 +80,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
                 obs.stdout = init_obs.stdout
                 obs.metadata["auto_init"] = True
         obs = self._with_context(obs)
+        obs = self._attach_repo_archive(obs)
         return self._apply_transform(obs)
 
     def step(self, action: GoPerfAction, timeout_s: Optional[float] = None, **kwargs):
@@ -128,6 +132,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
             )
 
         observation = self._with_context(observation)
+        observation = self._attach_repo_archive(observation)
         self._update_metrics_from_observation(observation)
 
         task = get_task(
@@ -184,6 +189,19 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         else:
             self._state.last_action_type = action.action_type
         return self._apply_transform(observation)
+
+    def _attach_repo_archive(self, observation: GoPerfObservation) -> GoPerfObservation:
+        if not self._state.workspace_path:
+            return observation
+        try:
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+                tar.add(self._state.workspace_path, arcname="repo")
+            observation.metadata["repo_archive_b64"] = base64.b64encode(buf.getvalue()).decode("ascii")
+            observation.metadata["repo_archive_format"] = "tar.gz"
+        except Exception as exc:
+            observation.metadata["repo_archive_error"] = str(exc)
+        return observation
 
     def _make_workspace(self, episode_id: str) -> Path:
         path = self._workspace_root / episode_id

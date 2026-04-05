@@ -1,6 +1,10 @@
 import json
 import os
 import textwrap
+import base64
+import io
+import tarfile
+import tempfile
 from typing import List, Optional
 
 from openai import OpenAI
@@ -10,11 +14,9 @@ from models import GoPerfAction
 from tasks import list_tasks, TaskConfig
 
 
-OPEN_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("HF_TOKEN")  # LLM API key
-OPEN_API_BASE_URL = os.getenv(
-    "API_BASE_URL", "https://api.openai.com/v1"
-)  # LLM endpoint
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")  # LLM model id
+OPEN_API_KEY = os.getenv("HF_TOKEN")  # Required by submission
+OPEN_API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")  # Required by submission
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")  # Required by submission
 ENV_BASE_URL = os.getenv("OPENENV_BASE_URL", "http://localhost:8000")  # OpenEnv server
 REPO_PATH = os.getenv("REPO_PATH", "go-bench-repo")  # repo to init
 TARGET_FILE = os.getenv(
@@ -53,6 +55,9 @@ SYSTEM_PROMPT = textwrap.dedent(
     Keep the existing import block structure. If you add strings, keep fmt and add strings alongside it.
     If you use strings.Builder, ensure strings is imported and actually used.
     Do not mix result and builder variables in the same function; use one consistently.
+    Never change the package/module declaration line at the top of the file.
+    Do not add new functions or new files. Only modify existing function bodies.
+    Do not emit hunks that add a new file (reject @@ -0,0 or file creation diffs).
     Do not add any extra text outside the diff.
     Do not use code fences. patch_diff must be a JSON string (escape newlines as \\n).
     """
@@ -122,9 +127,16 @@ def get_model_action(
     # Models from gpt-5 require max_completion_tokens.
     request_kwargs["max_completion_tokens"] = MAX_TOKENS
 
-    completion = client.chat.completions.create(**request_kwargs)
-    content = (completion.choices[0].message.content or "").strip()
+    content = ""
+    for attempt in range(3):
+        completion = client.chat.completions.create(**request_kwargs)
+        content = (completion.choices[0].message.content or "").strip()
+        if content:
+            break
+        if attempt < 2:
+            import time
 
+            time.sleep(0.5 * (2**attempt))
     if not content:
         raise ValueError("Empty model response")
     try:
@@ -180,6 +192,17 @@ def get_model_action(
             raise ValueError(
                 "patch_validation_error: hunk header must include ranges (no bare @@)"
             )
+        if "@@ -0,0" in action.patch_diff or "+0,0 @@" in action.patch_diff:
+            raise ValueError(
+                "patch_validation_error: empty hunks are not allowed"
+            )
+        has_change = False
+        for line in action.patch_diff.splitlines():
+            if line.startswith(("+", "-")) and not line.startswith(("+++", "---")):
+                has_change = True
+                break
+        if not has_change:
+            raise ValueError("patch_validation_error: no-op diff")
         # Validate basic consistency for strings.Builder usage.
         patch_body = action.patch_diff
         if "strings.Builder" in patch_body and '"strings"' not in patch_body:
@@ -209,10 +232,18 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
         steps_taken = 0
 
         # Load target file content for the model prompt.
-        # Just being strict, even if the workspace didnt had a git stuff, we will init always for work.
-        if not result.observation.repo_worktree_path:
-            raise RuntimeError("repo_worktree_path missing after auto_init")
-        workspace_path = result.observation.repo_worktree_path
+        workspace_path = None
+        archive_b64 = result.observation.metadata.get("repo_archive_b64")
+        if archive_b64:
+            tmp_dir = tempfile.mkdtemp(prefix="goperflab_repo_")
+            data = base64.b64decode(archive_b64)
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+                tar.extractall(tmp_dir)
+            workspace_path = os.path.join(tmp_dir, "repo")
+        if not workspace_path:
+            if not result.observation.repo_worktree_path:
+                raise RuntimeError("repo_worktree_path missing after auto_init")
+            workspace_path = result.observation.repo_worktree_path
 
         try:
             with open(
@@ -275,6 +306,15 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
                 error=error,
             )
 
+            # Refresh repo snapshot if provided by env.
+            archive_b64 = result.observation.metadata.get("repo_archive_b64")
+            if archive_b64:
+                tmp_dir = tempfile.mkdtemp(prefix="goperflab_repo_")
+                data = base64.b64decode(archive_b64)
+                with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+                    tar.extractall(tmp_dir)
+                workspace_path = os.path.join(tmp_dir, "repo")
+
             # Refresh file content so the model sees latest code.
             try:
                 with open(
@@ -298,10 +338,9 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
 
 
 def main() -> None:
-    # Allow local servers without a real API key.
     api_key = OPEN_API_KEY
-    if not api_key and OPEN_API_BASE_URL.startswith("http://localhost"):
-        api_key = "dummy"
+    if not api_key:
+        raise RuntimeError("HF_TOKEN is required by submission instructions")
 
     client = OpenAI(base_url=OPEN_API_BASE_URL, api_key=api_key)
     env = GoPerfEnv(base_url=ENV_BASE_URL).sync()
