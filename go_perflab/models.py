@@ -68,6 +68,7 @@ class GoPerfObservation(Observation):
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
+    metadata: dict = Field(default_factory=dict)
 
     # Workspace context
     repo_name: str | None = None
@@ -80,6 +81,8 @@ class GoPerfObservation(Observation):
     task_step_count: int | None = None
     task_remaining_budget: int | None = None
     task_build_flags: List[str] | None = None
+    delta_baseline: float | None = None
+    delta_prev_best: float | None = None
 
     # Benchmark results
     bench_summary: List[dict] | None = None
@@ -105,6 +108,7 @@ class GoPerfState(State):
 
     baseline_metrics: dict | None = None
     current_metrics: dict | None = None
+    prev_best_metrics: dict | None = None
 
     last_action: dict | None = None
     action_history: List[dict] | None = None

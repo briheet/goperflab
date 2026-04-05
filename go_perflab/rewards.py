@@ -10,13 +10,23 @@ def compute_reward(
 ) -> GoPerfReward:
     components: dict[str, float] = {}
 
-    speedup = _weighted_speedup(
-        state.baseline_metrics, state.current_metrics, task.metrics_weights
-    )
-    if speedup <= 1.0:
-        base_reward = (speedup - 1.0) * 0.5
-    else:
-        base_reward = min(speedup - 1.0, 2.0)
+    baseline = state.baseline_metrics
+    current = state.current_metrics
+    prev_best = state.prev_best_metrics
+
+    speedup_base = _weighted_speedup(baseline, current, task.metrics_weights)
+    speedup_prev = _weighted_speedup(prev_best, current, task.metrics_weights)
+
+    delta_base = speedup_base - 1.0
+    delta_prev = speedup_prev - 1.0
+    components["delta_vs_baseline"] = delta_base
+    components["delta_vs_prev_best"] = delta_prev
+
+    base_reward = 0.7 * delta_base + 0.3 * delta_prev
+    if base_reward > 2.0:
+        base_reward = 2.0
+    if base_reward < -1.0:
+        base_reward = -1.0
     components["speedup_reward"] = base_reward
 
     penalty = 0.0

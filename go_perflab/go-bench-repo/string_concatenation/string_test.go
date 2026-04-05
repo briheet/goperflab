@@ -20,7 +20,7 @@ func TestCalculateResult(t *testing.T) {
 
 func BenchmarkCalculateResult(b *testing.B) {
 
-	num := 100_100
+	num := 10_000
 	for b.Loop() {
 		calculateResult(num)
 	}
