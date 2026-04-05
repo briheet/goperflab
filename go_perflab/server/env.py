@@ -45,6 +45,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         self._state.baseline_metrics = None
         self._state.current_metrics = None
         self._state.prev_best_metrics = None
+        self._state.patch_cycles = 0
         task_id = kwargs.get("task_id")
         task = get_task(task_id)
         self._state.task_config = task.__dict__
@@ -99,6 +100,9 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
             if patch_obs.exit_code != 0:
                 observation = patch_obs
             else:
+                if self._state.patch_cycles is None:
+                    self._state.patch_cycles = 0
+                self._state.patch_cycles += 1
                 bench_action = GoPerfAction(
                     action_type="benchmarks",
                     bench_suite=".",
@@ -170,7 +174,10 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         ):
             observation.done = True
         if grade.get("score", 0.0) >= 1.0:
-            observation.done = True
+            min_patches = task.min_patches if task else 0
+            patch_cycles = self._state.patch_cycles or 0
+            if patch_cycles >= min_patches:
+                observation.done = True
 
         if action.action_type == "patch" and observation.exit_code == 0:
             self._state.last_action_type = "benchmarks"

@@ -39,14 +39,27 @@ def grade_task(task: TaskConfig, state: GoPerfState) -> dict:
     penalties = 0.0
     if state.current_metrics is None:
         penalties += 0.1
+
+    improved_count = 0
+    regressed_hard = False
     if state.current_metrics and state.baseline_metrics:
-        # Penalize regressions in any weighted metric
         for metric in task.metrics_weights:
             base_val = state.baseline_metrics.get(metric)
             cur_val = state.current_metrics.get(metric)
-            if base_val and cur_val and cur_val > base_val:
-                penalties += 0.05
-                break
+            if base_val is None or cur_val is None:
+                continue
+            if cur_val < base_val:
+                improved_count += 1
+            if cur_val > base_val * 1.10:
+                regressed_hard = True
+
+    # Require improvement in at least 2 metrics for full credit.
+    if improved_count < 2:
+        score *= 0.5
+
+    # Stronger penalty for >10% regression in any metric.
+    if regressed_hard:
+        penalties += 0.2
 
     final_score = max(score - penalties, 0.0)
     return {
@@ -54,5 +67,7 @@ def grade_task(task: TaskConfig, state: GoPerfState) -> dict:
         "speedup": speedup,
         "score": final_score,
         "penalties": penalties,
+        "improved_metrics": improved_count,
+        "hard_regression": regressed_hard,
         "target_speedup": target,
     }

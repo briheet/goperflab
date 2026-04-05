@@ -222,7 +222,7 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
         except Exception:
             file_content = ""
 
-        last_obs = result.observation.mode_dump()
+        last_obs = result.observation.model_dump()
 
         # Main interaction loop: ask model -> step env -> log.
         for step in range(steps_taken + 1, MAX_STEPS + 1):
@@ -274,6 +274,15 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
                 done=done,
                 error=error,
             )
+
+            # Refresh file content so the model sees latest code.
+            try:
+                with open(
+                    os.path.join(workspace_path, TARGET_FILE), "r", encoding="utf-8"
+                ) as f:
+                    file_content = f.read()
+            except Exception:
+                file_content = ""
 
             if done:
                 break

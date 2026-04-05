@@ -100,6 +100,7 @@ class GoPerfState(State):
     baseline_metrics: dict | None = None
     current_metrics: dict | None = None
     prev_best_metrics: dict | None = None
+    patch_cycles: int | None = None
 
     last_action: dict | None = None
     last_action_type: str | None = None
