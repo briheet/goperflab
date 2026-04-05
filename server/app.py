@@ -7,6 +7,11 @@ from models import GoPerfAction, GoPerfObservation
 app = create_fastapi_app(GoPerfEnvironment, GoPerfAction, GoPerfObservation)
 
 
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
 def main() -> None:
     uvicorn.run("server.app:app", host="0.0.0.0", port=8000)
 

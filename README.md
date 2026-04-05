@@ -6,7 +6,7 @@ OpenEnv models, deterministic graders, and three task tiers (easy/medium/hard).
 ## Environment overview
 
 GoPerfLab simulates the developer workflow of diagnosing and improving Go
-performance. Agents interact by running tests/benchmarks, performing escape/perf
+performance. Agents interact by running benchmarks, performing escape/perf
 analysis, and applying patches or build flags. Rewards are based on performance
 improvement and correctness.
 
@@ -16,12 +16,39 @@ Tasks:
 - Hard: escape analysis + perf tooling with stricter targets
 
 The server seeds each episode workspace with the bundled Go repo at
-`go-bench-repo/` and initializes a local git history, so agents can run git,
-tests, and benchmarks immediately.
+`go-bench-repo/` and initializes a local git history, so agents can run git
+and benchmarks immediately.
+
+## Episode structure
+
+Each task is an episode:
+
+1) `reset(auto_init=True)` creates a workspace, initializes git, and runs a baseline benchmark.
+2) `step(patch)` applies a patch and **auto-runs benchmarks** in the environment.
+3) The environment ends the episode when grade ≥ threshold **and** the minimum
+   patch cycles are met, or when budget is exhausted.
+
+## Reward & grading
+
+Rewards combine weighted improvements across `ns/op`, `B/op`, and `allocs/op`.
+We use a multi-metric gate and a regression penalty:
+
+- **Multi-metric gate**: at least 2 metrics must improve for full score.
+- **Regression penalty**: >10% regression in any metric incurs a strong penalty.
+- **Task-specific weights**:
+  - Easy: allocations-heavy
+  - Medium: ns/op + allocs
+  - Hard: ns/op dominant
+
+## Determinism & reproducibility
+
+- Benchmarks run with `-count=1` by default (configurable via action).
+- Performance can vary by CPU load; run on an idle machine for best stability.
+- Docker image pins dependencies to keep results consistent across runs.
 
 ## Action space (GoPerfAction)
 
-- `action_type`: `git` | `benchmarks` | `tests` | `build_flags` | `escape_analysis` | `perf` | `patch`
+- `action_type`: `git` | `benchmarks` | `build_flags` | `escape_analysis` | `perf` | `patch`
 - Git: `git_op`, `git_repo_name`, `git_target_dir`, `git_workspace`, `git_args`
 - Benchmarks: `bench_suite`, `bench_mem_required`, `bench_time`, `bench_count`, `bench_stat`,
   `bench_file_name`, `bench_timeout`
@@ -55,6 +82,11 @@ Validate OpenEnv:
 Run server:
 ```
 uv run server.app
+```
+
+Health check:
+```
+curl -s http://localhost:8000/health
 ```
 
 Smoke test (client):
