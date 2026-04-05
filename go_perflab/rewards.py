@@ -33,10 +33,6 @@ def compute_reward(
     if observation.exit_code != 0:
         penalty -= 0.5
         components["exec_penalty"] = -0.5
-    if observation.test_passed is False:
-        penalty -= 0.25
-        components["test_penalty"] = -0.25
-
     total = base_reward + penalty
     components["total"] = total
     return GoPerfReward(score=total, components=components)

@@ -10,14 +10,17 @@ from models import GoPerfAction
 from tasks import list_tasks, TaskConfig
 
 
-OPEN_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("HF_TOKEN")
-OPEN_API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
-ENV_BASE_URL = os.getenv("OPENENV_BASE_URL", "http://localhost:8000")
-REPO_PATH = os.getenv("REPO_PATH", "go-bench-repo")
-TARGET_FILE = os.getenv("TARGET_FILE", "string_concatenation/string.go")
-MAX_STEPS = int(os.getenv("MAX_STEPS", "10"))
-LOG_BENCH_SUMMARY = os.getenv("LOG_BENCH_SUMMARY", "1") == "1"
+OPEN_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("HF_TOKEN")  # LLM API key
+OPEN_API_BASE_URL = os.getenv(
+    "API_BASE_URL", "https://api.openai.com/v1"
+)  # LLM endpoint
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")  # LLM model id
+ENV_BASE_URL = os.getenv("OPENENV_BASE_URL", "http://localhost:8000")  # OpenEnv server
+REPO_PATH = os.getenv("REPO_PATH", "go-bench-repo")  # repo to init
+TARGET_FILE = os.getenv(
+    "TARGET_FILE", "string_concatenation/string.go"
+)  # file to patch
+MAX_STEPS = int(os.getenv("MAX_STEPS", "10"))  # max steps per task
 TEMPERATURE = 0.2
 MAX_TOKENS = 300
 
@@ -31,6 +34,7 @@ SYSTEM_PROMPT = textwrap.dedent(
     Your end goal should be very very highly optimised code with very good overview.
     Performance is your first priority.
     Return exactly one JSON object for GoPerfAction.
+    The environment enforces that a patch should be followed by a benchmarks action.
     On the first model step, you MUST return:
     {"action_type":"patch","patch_diff":"<unified diff>"}
     The diff must apply cleanly to TARGET_FILE.
@@ -56,12 +60,14 @@ SYSTEM_PROMPT = textwrap.dedent(
 
 
 def log_start(task: str, env: str, model: str) -> None:
+    # Required by submission format.
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
 def log_step(
     step: int, action: str, reward: float, done: bool, error: Optional[str]
 ) -> None:
+    # Required by submission format.
     error_val = error if error else "null"
     done_val = str(done).lower()
     print(
@@ -71,6 +77,7 @@ def log_step(
 
 
 def log_end(success: bool, steps: int, rewards: List[float]) -> None:
+    # Required by submission format.
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
         f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
@@ -81,6 +88,7 @@ def log_end(success: bool, steps: int, rewards: List[float]) -> None:
 def build_user_prompt(
     task_goal: str, last_obs: dict, step: int, file_content: str
 ) -> str:
+    # Provide task + file context to the model.
     return textwrap.dedent(
         f"""
         Task goal: {task_goal}
@@ -98,7 +106,10 @@ def build_user_prompt(
 def get_model_action(
     client: OpenAI, task_goal: str, last_obs: dict, step: int, file_content: str
 ) -> GoPerfAction:
+    # Build user prompt
     prompt = build_user_prompt(task_goal, last_obs, step, file_content)
+
+    # Build request to OpenAI-compatible API.
     request_kwargs = {
         "model": MODEL_NAME,
         "messages": [
@@ -107,12 +118,13 @@ def get_model_action(
         ],
         "temperature": TEMPERATURE,
     }
-    if MODEL_NAME.startswith("gpt-5"):
-        request_kwargs["max_completion_tokens"] = MAX_TOKENS
-    else:
-        request_kwargs["max_tokens"] = MAX_TOKENS
+
+    # Models from gpt-5 require max_completion_tokens.
+    request_kwargs["max_completion_tokens"] = MAX_TOKENS
+
     completion = client.chat.completions.create(**request_kwargs)
     content = (completion.choices[0].message.content or "").strip()
+
     if not content:
         raise ValueError("Empty model response")
     try:
@@ -178,6 +190,7 @@ def get_model_action(
 
 
 def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
+    # One full episode per task: reset -> init_repo -> baseline -> model actions.
     rewards: List[float] = []
     steps_taken = 0
     success = False
@@ -185,75 +198,22 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
     log_start(task=task.task_id, env="goperflab", model=MODEL_NAME)
 
     try:
-        result = env.reset(task_id=task.task_id)
-
-        init_action = GoPerfAction(
-            action_type="init_repo",
+        # Reset environment for this task (auto-init repo + baseline in env).
+        result = env.reset(
+            task_id=task.task_id,
+            auto_init=True,
             repo_path=REPO_PATH,
             repo_copy=True,
             repo_init_if_missing=True,
         )
-        result = env.step(init_action)
-        steps_taken = 1
-        reward = float(result.reward or 0.0)
-        rewards.append(reward)
-        error = (
-            result.observation.stderr[:200]
-            if result.observation.exit_code != 0
-            else None
-        )
-        log_step(
-            step=steps_taken,
-            action=json.dumps(
-                init_action.model_dump(exclude_none=True), ensure_ascii=True
-            ),
-            reward=reward,
-            done=bool(result.done),
-            error=error,
-        )
+        steps_taken = 0
 
-        baseline_action = GoPerfAction(
-            action_type="benchmarks",
-            bench_suite=".",
-            bench_mem_required=True,
-            bench_count=1,
-        )
-        result = env.step(baseline_action)
-        steps_taken += 1
-        reward = float(result.reward or 0.0)
-        rewards.append(reward)
-        error = (
-            result.observation.stderr[:200]
-            if result.observation.exit_code != 0
-            else None
-        )
-        baseline_payload = baseline_action.model_dump(exclude_none=True)
-        reward_components = result.observation.metadata.get("reward_components", {})
-        raw_delta_base = (
-            result.observation.delta_baseline
-            if result.observation.delta_baseline is not None
-            else reward_components.get("delta_vs_baseline")
-        )
-        raw_delta_prev = (
-            result.observation.delta_prev_best
-            if result.observation.delta_prev_best is not None
-            else reward_components.get("delta_vs_prev_best")
-        )
-        if raw_delta_base is not None:
-            baseline_payload["_delta_baseline_pct"] = raw_delta_base * 100.0
-        if raw_delta_prev is not None:
-            baseline_payload["_delta_prev_best_pct"] = raw_delta_prev * 100.0
-        if LOG_BENCH_SUMMARY:
-            baseline_payload["_bench_summary"] = result.observation.bench_summary
-        log_step(
-            step=steps_taken,
-            action=json.dumps(baseline_payload, ensure_ascii=True),
-            reward=reward,
-            done=bool(result.done),
-            error=error,
-        )
+        # Load target file content for the model prompt.
+        # Just being strict, even if the workspace didnt had a git stuff, we will init always for work.
+        if not result.observation.repo_worktree_path:
+            raise RuntimeError("repo_worktree_path missing after auto_init")
+        workspace_path = result.observation.repo_worktree_path
 
-        workspace_path = result.observation.repo_worktree_path or REPO_PATH
         try:
             with open(
                 os.path.join(workspace_path, TARGET_FILE), "r", encoding="utf-8"
@@ -262,28 +222,18 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
         except Exception:
             file_content = ""
 
-        last_obs = result.observation.model_dump()
+        last_obs = result.observation.mode_dump()
 
-        patch_attempts = 0
-        final_action: GoPerfAction | None = None
-        last_patch_step = None
-        next_required_action = "patch"
+        # Main interaction loop: ask model -> step env -> log.
         for step in range(steps_taken + 1, MAX_STEPS + 1):
             if result.done:
                 break
 
             try:
-                if next_required_action == "benchmarks":
-                    action = GoPerfAction(
-                        action_type="benchmarks",
-                        bench_suite=".",
-                        bench_mem_required=True,
-                        bench_count=1,
-                    )
-                else:
-                    action = get_model_action(
-                        client, task.goal, last_obs, step, file_content
-                    )
+                # Ask the model for the next action.
+                action = get_model_action(
+                    client, task.goal, last_obs, step, file_content
+                )
             except Exception as exc:
                 log_step(
                     step=step,
@@ -299,11 +249,10 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
                     last_obs["last_patch_error"] = str(exc)
                     continue
                 break
-            if step == steps_taken + 1 and next_required_action == "patch" and action.action_type != "patch":
-                raise RuntimeError("Expected patch action on first LLM step.")
             if action.action_type not in {"patch", "benchmarks"}:
                 raise RuntimeError(f"Unsupported action_type: {action.action_type}")
 
+            # Send action to env and log the result.
             action_payload = action.model_dump(exclude_none=True)
             result = env.step(action)
             reward = float(result.reward or 0.0)
@@ -318,26 +267,6 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
                 if result.observation.exit_code != 0
                 else None
             )
-            reward_components = result.observation.metadata.get("reward_components", {})
-            delta_base = result.observation.delta_baseline
-            delta_prev = result.observation.delta_prev_best
-            if action.action_type == "benchmarks":
-                raw_delta_base = (
-                    delta_base
-                    if delta_base is not None
-                    else reward_components.get("delta_vs_baseline")
-                )
-                raw_delta_prev = (
-                    delta_prev
-                    if delta_prev is not None
-                    else reward_components.get("delta_vs_prev_best")
-                )
-                if raw_delta_base is not None:
-                    action_payload["_delta_baseline_pct"] = raw_delta_base * 100.0
-                if raw_delta_prev is not None:
-                    action_payload["_delta_prev_best_pct"] = raw_delta_prev * 100.0
-                if LOG_BENCH_SUMMARY:
-                    action_payload["_bench_summary"] = result.observation.bench_summary
             log_step(
                 step=step,
                 action=json.dumps(action_payload, ensure_ascii=True),
@@ -346,86 +275,21 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
                 error=error,
             )
 
-            grade = result.observation.metadata.get("grade", {})
-            if grade.get("score", 0.0) >= 1.0:
-                success = True
-            if action.action_type == "patch":
-                patch_attempts += 1
-                last_patch_step = step
-                if result.observation.exit_code != 0 and patch_attempts < 2:
-                    # Retry once with error context if patch failed.
-                    last_obs["last_patch_error"] = result.observation.stderr[:400]
-                    continue
-                next_required_action = "benchmarks"
-            elif action.action_type == "benchmarks":
-                next_required_action = "patch"
             if done:
                 break
 
-        if not result.done:
-            if last_patch_step is None or steps_taken <= last_patch_step:
-                final_action = GoPerfAction(
-                    action_type="benchmarks",
-                    bench_suite=".",
-                    bench_mem_required=True,
-                    bench_count=1,
-                )
-                result = env.step(final_action)
-                reward = float(result.reward or 0.0)
-                rewards.append(reward)
-                steps_taken += 1
-                error = (
-                    result.observation.stderr[:200]
-                    if result.observation.exit_code != 0
-                    else None
-                )
-            if final_action is not None:
-                final_payload = final_action.model_dump(exclude_none=True)
-                reward_components = result.observation.metadata.get("reward_components", {})
-                raw_delta_base = (
-                    result.observation.delta_baseline
-                    if result.observation.delta_baseline is not None
-                    else reward_components.get("delta_vs_baseline")
-                )
-                raw_delta_prev = (
-                    result.observation.delta_prev_best
-                    if result.observation.delta_prev_best is not None
-                    else reward_components.get("delta_vs_prev_best")
-                )
-                if raw_delta_base is not None:
-                    final_payload["_delta_baseline_pct"] = raw_delta_base * 100.0
-                if raw_delta_prev is not None:
-                    final_payload["_delta_prev_best_pct"] = raw_delta_prev * 100.0
-                if LOG_BENCH_SUMMARY:
-                    final_payload["_bench_summary"] = result.observation.bench_summary
-                log_step(
-                    step=steps_taken,
-                    action=json.dumps(final_payload, ensure_ascii=True),
-                    reward=reward,
-                    done=bool(result.done),
-                    error=error,
-                )
-
-            grade = result.observation.metadata.get("grade", {})
-            if grade.get("score", 0.0) >= 1.0:
-                success = True
-            if reward > 0:
-                success = True
+        # Success is determined by env metadata or done flag.
+        grade = result.observation.metadata.get("grade", {})
+        if grade.get("score", 0.0) >= 1.0:
+            success = True
+        elif bool(result.done):
+            success = True
     finally:
-        # Final success check based on last observation.
-        try:
-            if result is not None:
-                grade = result.observation.metadata.get("grade", {})
-                if grade.get("score", 0.0) >= 1.0:
-                    success = True
-                if (result.reward or 0.0) > 0:
-                    success = True
-        except Exception:
-            pass
         log_end(success=success, steps=steps_taken, rewards=rewards)
 
 
 def main() -> None:
+    # Allow local servers without a real API key.
     api_key = OPEN_API_KEY
     if not api_key and OPEN_API_BASE_URL.startswith("http://localhost"):
         api_key = "dummy"

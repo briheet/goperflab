@@ -25,7 +25,6 @@ tests, and benchmarks immediately.
 - Git: `git_op`, `git_repo_name`, `git_target_dir`, `git_workspace`, `git_args`
 - Benchmarks: `bench_suite`, `bench_mem_required`, `bench_time`, `bench_count`, `bench_stat`,
   `bench_file_name`, `bench_timeout`
-- Tests: `test_suite`, `test_verbose`, `test_timeout`, `test_output_save_file`
 - Build flags: `build_flags`
 - Escape analysis: `escape_target`, `escape_flags`, `escape_output_file`
 - Perf: `perf_mode`, `perf_bench`, `perf_args`, `perf_output_file`
@@ -37,7 +36,6 @@ tests, and benchmarks immediately.
 - Repo context: `repo_name`, `repo_worktree_path`, `repo_git_status`
 - Task context: `task_id`, `task_goal`, `task_step_count`, `task_remaining_budget`, `task_build_flags`
 - Benchmarks: `bench_summary`, `benchstat_summary`
-- Tests: `test_passed`, `test_failures`
 - Escape analysis: `escape_summary`, `escape_count_total`
 - Perf: `perf_summary`
 - Reward/grade: `reward` and `metadata.reward_components`, `metadata.grade`
@@ -68,7 +66,6 @@ from models import GoPerfAction
 env = GoPerfEnv(base_url="http://localhost:8000").sync()
 with env:
     result = env.reset(task_id="easy")
-    action = GoPerfAction(action_type="tests", test_suite="./...", test_verbose=False)
     result = env.step(action)
     print(result.observation.metadata.get("grade"))
 PY

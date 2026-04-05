@@ -8,7 +8,6 @@ class GoPerfAction(Action):
     action_type: Literal[
         "git",
         "benchmarks",
-        "tests",
         "build_flags",
         "escape_analysis",
         "perf",
@@ -33,11 +32,6 @@ class GoPerfAction(Action):
     bench_timeout: int | None = None  # time in seconds
     # TODO: Check if we can somehow automate the profiling data and compare
 
-    # Tests specific stuff
-    test_suite: str | None = None
-    test_verbose: bool | None = None
-    test_timeout: int | None = None
-    test_output_save_file: str | None = None
 
     # Build flags
     build_flags: List[str] | None = None
@@ -88,9 +82,6 @@ class GoPerfObservation(Observation):
     bench_summary: List[dict] | None = None
     benchstat_summary: dict | None = None
 
-    # Tests
-    test_passed: bool | None = None
-    test_failures: List[str] | None = None
 
     # Escape analysis
     escape_summary: List[dict] | None = None
@@ -111,6 +102,7 @@ class GoPerfState(State):
     prev_best_metrics: dict | None = None
 
     last_action: dict | None = None
+    last_action_type: str | None = None
     action_history: List[dict] | None = None
 
     task_config: dict | None = None

@@ -9,7 +9,7 @@ environment:
 tasks:
   - id: easy
     title: Baseline cleanup
-    goal: Reduce allocations with simple refactors while keeping tests green.
+    goal: Reduce allocations with simple refactors while keeping output stable.
   - id: medium
     title: Common patterns
     goal: Apply multiple goperf.dev patterns to improve two benchmarks.

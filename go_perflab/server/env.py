@@ -55,6 +55,27 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         obs = self._base_observation(stdout="reset")
         obs.task_id = task.task_id
         obs.task_goal = task.goal
+
+        # auto-init: clone/init repo + run baseline benchmark.
+        # At the start of inference we need to clone and run baseline to compare and go.
+        if kwargs.get("auto_init"):
+            # Build action
+            init_action = GoPerfAction(
+                action_type="init_repo",
+                repo_path=kwargs.get("repo_path"),
+                repo_copy=kwargs.get("repo_copy", True),
+                repo_init_if_missing=kwargs.get("repo_init_if_missing", True),
+            )
+
+            init_obs = self._handle_init_repo(init_action)
+            if init_obs.exit_code != 0:
+                obs.stderr = init_obs.stderr
+                obs.exit_code = init_obs.exit_code
+                obs.metadata["auto_init_error"] = init_obs.stderr
+            else:
+                obs.stdout = init_obs.stdout
+                obs.metadata["auto_init"] = True
+        obs = self._with_context(obs)
         return self._apply_transform(obs)
 
     def step(self, action: GoPerfAction, timeout_s: Optional[float] = None, **kwargs):
@@ -66,17 +87,33 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
 
         observation = GoPerfObservation()
         if action.action_type == "init_repo":
-            observation = self._handle_init_repo(action)
+            # Internal-only: use reset(auto_init=True) instead.
+            observation = self._base_observation(
+                stderr="init_repo is internal-only; use reset(auto_init=True)",
+                exit_code=2,
+            )
         elif action.action_type == "git":
             observation = self._handle_git(action, timeout_s=timeout_s)
         elif action.action_type == "patch":
-            observation = self._handle_patch(action)
+            patch_obs = self._handle_patch(action)
+            if patch_obs.exit_code != 0:
+                observation = patch_obs
+            else:
+                bench_action = GoPerfAction(
+                    action_type="benchmarks",
+                    bench_suite=".",
+                    bench_mem_required=True,
+                    bench_count=1,
+                )
+                bench_obs = self._handle_benchmarks(bench_action, timeout_s=timeout_s)
+                bench_obs.metadata["patch_stdout"] = patch_obs.stdout
+                bench_obs.metadata["patch_stderr"] = patch_obs.stderr
+                bench_obs.metadata["patch_exit_code"] = patch_obs.exit_code
+                observation = bench_obs
         elif action.action_type == "build_flags":
             observation = self._handle_build_flags(action)
         elif action.action_type == "benchmarks":
             observation = self._handle_benchmarks(action, timeout_s=timeout_s)
-        elif action.action_type == "tests":
-            observation = self._handle_tests(action, timeout_s=timeout_s)
         elif action.action_type == "escape_analysis":
             observation = self._handle_escape_analysis(action, timeout_s=timeout_s)
         elif action.action_type == "perf":
@@ -100,8 +137,8 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
 
         # Auto-revert on failure, negative reward, or regression vs prev-best if a patch was applied
         if getattr(self._state, "last_patch_files", None):
-            failed = observation.exit_code != 0 or observation.test_passed is False
-            negative = (observation.reward is not None and observation.reward < 0)
+            failed = observation.exit_code != 0
+            negative = observation.reward is not None and observation.reward < 0
             regress_prev = False
             if observation.metadata.get("reward_components"):
                 delta_prev = observation.metadata["reward_components"].get(
@@ -112,7 +149,9 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
             if failed or negative or regress_prev:
                 files = self._state.last_patch_files
                 for rel in files:
-                    self._run_command(["git", "checkout", "--", rel], self._workspace_path(), None)
+                    self._run_command(
+                        ["git", "checkout", "--", rel], self._workspace_path(), None
+                    )
                 observation.stderr += "\n[auto-revert] reverted patch files"
                 self._state.last_patch_files = None
             else:
@@ -133,6 +172,10 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         if grade.get("score", 0.0) >= 1.0:
             observation.done = True
 
+        if action.action_type == "patch" and observation.exit_code == 0:
+            self._state.last_action_type = "benchmarks"
+        else:
+            self._state.last_action_type = action.action_type
         return self._apply_transform(observation)
 
     def _make_workspace(self, episode_id: str) -> Path:
@@ -159,6 +202,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
             target = src
             self._state.workspace_path = str(target.resolve())
 
+        # Lets say somehow is it not a repo with a existing git stuff, have some so called configs
         if action.repo_init_if_missing:
             if not (target / ".git").exists():
                 self._run_command(["git", "init"], target, None)
@@ -303,7 +347,12 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
                 if saw_unified and in_hunk:
                     out.append(line.rstrip())
                     continue
-                if line.startswith(" ") or line.startswith("+") or line.startswith("-") or not line:
+                if (
+                    line.startswith(" ")
+                    or line.startswith("+")
+                    or line.startswith("-")
+                    or not line
+                ):
                     if current_go_file and in_hunk:
                         prefix = line[0] if line and line[0] in {" ", "+", "-"} else ""
                         content = line[1:] if prefix else line
@@ -311,8 +360,12 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
                         if content.startswith(" \t"):
                             content = content[1:]
                             content_stripped = content.lstrip()
-                        if (not saw_unified) and prefix == " " and content_stripped.startswith(
-                            ("func ", "package ", "import ")
+                        if (
+                            (not saw_unified)
+                            and prefix == " "
+                            and content_stripped.startswith(
+                                ("func ", "package ", "import ")
+                            )
                         ):
                             prefix = ""
                             content = content_stripped
@@ -388,25 +441,38 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
                     j = i + 1
                     while j < len(lines):
                         nxt = lines[j]
-                        if nxt.startswith("@@") or nxt.startswith("diff --git") or nxt.startswith("--- a/") or nxt.startswith("+++ b/"):
+                        if (
+                            nxt.startswith("@@")
+                            or nxt.startswith("diff --git")
+                            or nxt.startswith("--- a/")
+                            or nxt.startswith("+++ b/")
+                        ):
                             break
                         if nxt and not nxt.startswith((" ", "+", "-")):
                             nxt = " " + nxt
                         hunk_lines.append(nxt)
                         j += 1
-                    old_count = sum(1 for l in hunk_lines if l.startswith(" ") or l.startswith("-"))
-                    new_count = sum(1 for l in hunk_lines if l.startswith(" ") or l.startswith("+"))
+                    old_count = sum(
+                        1 for l in hunk_lines if l.startswith(" ") or l.startswith("-")
+                    )
+                    new_count = sum(
+                        1 for l in hunk_lines if l.startswith(" ") or l.startswith("+")
+                    )
                     start_line = 1
                     if current_file and current_file.exists():
                         file_lines = current_file.read_text().splitlines()
-                        context = next((l for l in hunk_lines if l.startswith(" ")), None)
+                        context = next(
+                            (l for l in hunk_lines if l.startswith(" ")), None
+                        )
                         if context:
                             ctx = context[1:]
                             for idx, fl in enumerate(file_lines, 1):
                                 if fl == ctx:
                                     start_line = idx
                                     break
-                    out.append(f"@@ -{start_line},{max(old_count,1)} +{start_line},{max(new_count,1)} @@")
+                    out.append(
+                        f"@@ -{start_line},{max(old_count, 1)} +{start_line},{max(new_count, 1)} @@"
+                    )
                     out.extend(hunk_lines)
                     i = j
                     continue
@@ -540,23 +606,6 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
             (workspace / action.bench_file_name).write_text(stdout, encoding="utf-8")
         obs = self._base_observation(stdout=stdout, stderr=stderr, exit_code=code)
         obs.bench_summary = self._parse_bench_output(stdout)
-        return obs
-
-    def _handle_tests(self, action: GoPerfAction, timeout_s: Optional[float]):
-        workspace = self._workspace_path()
-        suite = action.test_suite or "./..."
-        cmd = ["go", "test", suite]
-        if action.test_verbose:
-            cmd.append("-v")
-        if action.test_timeout:
-            cmd.append(f"-timeout={action.test_timeout}s")
-        stdout, stderr, code = self._run_command(cmd, workspace, timeout_s)
-        if action.test_output_save_file:
-            (workspace / action.test_output_save_file).write_text(
-                stdout + stderr, encoding="utf-8"
-            )
-        obs = self._base_observation(stdout=stdout, stderr=stderr, exit_code=code)
-        obs.test_passed = code == 0
         return obs
 
     def _handle_escape_analysis(self, action: GoPerfAction, timeout_s: Optional[float]):
