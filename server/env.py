@@ -29,6 +29,15 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         )
         self._state = GoPerfState()
 
+    def _clamp_score(self, value: float | None) -> float | None:
+        if value is None:
+            return None
+        if value <= 0.0:
+            return 0.01
+        if value >= 1.0:
+            return 0.99
+        return value
+
     @property
     def state(self) -> GoPerfState:
         return self._state
@@ -141,7 +150,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
             self._state.task_config.get("task_id") if self._state.task_config else None
         )
         reward = compute_reward(task, self._state, observation)
-        observation.reward = reward.score
+        observation.reward = self._clamp_score(reward.score)
         observation.metadata["reward_components"] = reward.components
         observation.delta_baseline = reward.components.get("delta_vs_baseline")
         observation.delta_prev_best = reward.components.get("delta_vs_prev_best")
@@ -171,6 +180,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
                     self._state.prev_best_metrics = self._state.current_metrics
 
         grade = grade_task(task, self._state)
+        grade["score"] = self._clamp_score(grade.get("score"))
         observation.metadata["grade"] = grade
 
         if self._state.budget_remaining is not None:
