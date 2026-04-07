@@ -3,6 +3,8 @@ from __future__ import annotations
 from models import GoPerfState
 from tasks import TaskConfig
 
+_SCORE_EPS = 1e-6
+
 
 def _weighted_speedup(
     baseline: dict | None, current: dict | None, weights: dict
@@ -62,6 +64,11 @@ def grade_task(task: TaskConfig, state: GoPerfState) -> dict:
         penalties += 0.2
 
     final_score = max(score - penalties, 0.0)
+    # Keep scores strictly within (0, 1) for validator compatibility.
+    if final_score <= 0.0:
+        final_score = _SCORE_EPS
+    elif final_score >= 1.0:
+        final_score = 1.0 - _SCORE_EPS
     return {
         "task_id": task.task_id,
         "speedup": speedup,
