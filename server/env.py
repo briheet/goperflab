@@ -134,6 +134,8 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         observation = self._with_context(observation)
         observation = self._attach_repo_archive(observation)
         self._update_metrics_from_observation(observation)
+        if observation.exit_code != 0 and "last_action_error" not in observation.metadata:
+            observation.metadata["last_action_error"] = observation.stderr
 
         task = get_task(
             self._state.task_config.get("task_id") if self._state.task_config else None
