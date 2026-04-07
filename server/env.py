@@ -181,7 +181,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         ):
             observation.done = True
         # Score is clamped to (0, 1) in the grader; treat near-1.0 as success.
-        if grade.get("score", 0.0) >= 1.0 - 1e-6:
+        if grade.get("score", 0.0) >= 0.99:
             min_patches = task.min_patches if task else 0
             patch_cycles = self._state.patch_cycles or 0
             if patch_cycles >= min_patches:

@@ -75,9 +75,9 @@ def log_step(
     # Required by submission format.
     # Clamp to ensure printed value stays strictly within (0, 1) after rounding.
     if reward <= 0.0:
-        reward = 0.005
+        reward = 0.01
     elif reward >= 1.0:
-        reward = 0.995
+        reward = 0.99
     error_val = error if error else "null"
     done_val = str(done).lower()
     print(
@@ -92,9 +92,9 @@ def log_end(success: bool, steps: int, rewards: List[float]) -> None:
     adj_rewards = []
     for r in rewards:
         if r <= 0.0:
-            r = 0.005
+            r = 0.01
         elif r >= 1.0:
-            r = 0.995
+            r = 0.99
         adj_rewards.append(r)
     rewards_str = ",".join(f"{r:.2f}" for r in adj_rewards)
     print(

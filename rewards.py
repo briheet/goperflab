@@ -4,7 +4,8 @@ from models import GoPerfObservation, GoPerfReward, GoPerfState
 from tasks import TaskConfig
 from graders import _weighted_speedup
 
-_SCORE_EPS = 1e-6
+_SCORE_MIN = 0.01
+_SCORE_MAX = 0.99
 
 
 def compute_reward(
@@ -41,8 +42,8 @@ def compute_reward(
     score = total
     # Keep reward score strictly within (0, 1) for validator compatibility.
     if score <= 0.0:
-        score = _SCORE_EPS
+        score = _SCORE_MIN
     elif score >= 1.0:
-        score = 1.0 - _SCORE_EPS
+        score = _SCORE_MAX
 
     return GoPerfReward(score=score, components=components)
