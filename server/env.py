@@ -8,6 +8,7 @@ import tarfile
 from pathlib import Path
 from typing import Optional
 import re
+import math
 
 from openenv.core.env_server import Environment
 
@@ -32,6 +33,8 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
     def _clamp_score(self, value: float | None) -> float | None:
         if value is None:
             return None
+        if not math.isfinite(value):
+            return 0.01
         if value <= 0.0:
             return 0.01
         if value >= 1.0:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from models import GoPerfState
 from tasks import TaskConfig
 
@@ -66,7 +68,9 @@ def grade_task(task: TaskConfig, state: GoPerfState) -> dict:
 
     final_score = max(score - penalties, 0.0)
     # Keep scores strictly within (0, 1) for validator compatibility.
-    if final_score <= 0.0:
+    if not math.isfinite(final_score):
+        final_score = _SCORE_MIN
+    elif final_score <= 0.0:
         final_score = _SCORE_MIN
     elif final_score >= 1.0:
         final_score = _SCORE_MAX
