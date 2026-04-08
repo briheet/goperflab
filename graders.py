@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import math
-
 from models import GoPerfState
+from score_utils import normalize_score
 from tasks import TaskConfig
-
-_SCORE_MIN = 0.01
-_SCORE_MAX = 0.99
 
 
 def _weighted_speedup(
@@ -66,14 +62,7 @@ def grade_task(task: TaskConfig, state: GoPerfState) -> dict:
     if regressed_hard:
         penalties += 0.2
 
-    final_score = max(score - penalties, 0.0)
-    # Keep scores strictly within (0, 1) for validator compatibility.
-    if not math.isfinite(final_score):
-        final_score = _SCORE_MIN
-    elif final_score <= 0.0:
-        final_score = _SCORE_MIN
-    elif final_score >= 1.0:
-        final_score = _SCORE_MAX
+    final_score = normalize_score(score - penalties)
     return {
         "task_id": task.task_id,
         "speedup": speedup,

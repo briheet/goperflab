@@ -1,6 +1,7 @@
 from typing import List, Literal
 from pydantic import BaseModel, Field
 from openenv.core.env_server.types import Action, Observation, State
+from score_utils import SCORE_MIN
 
 
 class GoPerfAction(Action):
@@ -116,5 +117,5 @@ class GoPerfState(State):
 
 
 class GoPerfReward(BaseModel):
-    score: float = 0.0
+    score: float = SCORE_MIN
     components: dict = Field(default_factory=dict)

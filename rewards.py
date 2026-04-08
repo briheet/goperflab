@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import math
-
 from models import GoPerfObservation, GoPerfReward, GoPerfState
+from score_utils import normalize_score
 from tasks import TaskConfig
 from graders import _weighted_speedup
-
-_SCORE_MIN = 0.01
-_SCORE_MAX = 0.99
 
 
 def compute_reward(
@@ -41,13 +37,6 @@ def compute_reward(
     total = base_reward + penalty
     components["total"] = total
 
-    score = total
-    # Keep reward score strictly within (0, 1) for validator compatibility.
-    if not math.isfinite(score):
-        score = _SCORE_MIN
-    elif score <= 0.0:
-        score = _SCORE_MIN
-    elif score >= 1.0:
-        score = _SCORE_MAX
+    score = normalize_score(total)
 
     return GoPerfReward(score=score, components=components)

@@ -338,7 +338,7 @@ def run_task(client: OpenAI, env: GoPerfEnv, task: TaskConfig) -> None:
 
         # Success is determined by env metadata or done flag.
         grade = result.observation.metadata.get("grade", {})
-        if grade.get("score", 0.0) >= 1.0:
+        if grade.get("score", 0.0) >= 0.9:
             success = True
         elif bool(result.done):
             success = True

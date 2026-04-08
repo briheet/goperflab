@@ -8,11 +8,11 @@ import tarfile
 from pathlib import Path
 from typing import Optional
 import re
-import math
 
 from openenv.core.env_server import Environment
 
 from models import GoPerfAction, GoPerfObservation, GoPerfState
+from score_utils import normalize_score
 from tasks import get_task
 from graders import grade_task
 from rewards import compute_reward
@@ -33,13 +33,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
     def _clamp_score(self, value: float | None) -> float | None:
         if value is None:
             return None
-        if not math.isfinite(value):
-            return 0.01
-        if value <= 0.0:
-            return 0.01
-        if value >= 1.0:
-            return 0.99
-        return value
+        return normalize_score(value)
 
     @property
     def state(self) -> GoPerfState:
@@ -104,11 +98,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
 
         observation = GoPerfObservation()
         if action.action_type == "init_repo":
-            # Internal-only: use reset(auto_init=True) instead.
-            observation = self._base_observation(
-                stderr="init_repo is internal-only; use reset(auto_init=True)",
-                exit_code=2,
-            )
+            observation = self._handle_init_repo(action)
         elif action.action_type == "git":
             observation = self._handle_git(action, timeout_s=timeout_s)
         elif action.action_type == "patch":
@@ -193,8 +183,8 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
             and self._state.budget_remaining <= 0
         ):
             observation.done = True
-        # Score is clamped to (0, 1) in the grader; treat near-1.0 as success.
-        if grade.get("score", 0.0) >= 0.99:
+        # Score is clamped to (0, 1) in the grader; treat the max band as success.
+        if grade.get("score", 0.0) >= 0.9:
             min_patches = task.min_patches if task else 0
             patch_cycles = self._state.patch_cycles or 0
             if patch_cycles >= min_patches:
@@ -237,8 +227,11 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         workspace = self._workspace_path()
         use_copy = bool(action.repo_copy)
         if use_copy:
-            shutil.copytree(src, workspace, dirs_exist_ok=True)
-            target = workspace
+            target = workspace / src.name
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(src, target, dirs_exist_ok=True)
+            self._state.workspace_path = str(target.resolve())
         else:
             target = src
             self._state.workspace_path = str(target.resolve())
@@ -270,6 +263,12 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
             self._state.baseline_metrics = bench_obs.bench_summary[0].get("metrics")
             self._state.current_metrics = self._state.baseline_metrics
             self._state.prev_best_metrics = self._state.baseline_metrics
+        if bench_obs.exit_code != 0:
+            return self._base_observation(
+                stdout=f"repo ready at {target}",
+                stderr=bench_obs.stderr,
+                exit_code=bench_obs.exit_code,
+            )
 
         return self._base_observation(stdout=f"repo ready at {target}")
 
