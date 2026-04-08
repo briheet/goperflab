@@ -35,6 +35,13 @@ class GoPerfEnvTests(unittest.TestCase):
         workspace = Path(self.env.state.workspace_path or "")
         self.assertTrue((workspace / ".git").exists())
         self.assertEqual(self.env.state.repo_name, repo_path.name)
+        self.assertIsInstance(self.env.state.reward_trace, list)
+        self.assertEqual(len(self.env.state.reward_trace or []), 1)
+        trace_entry = self.env.state.reward_trace[0]
+        self.assertEqual(trace_entry["step"], 1)
+        self.assertEqual(trace_entry["action_type"], "init_repo")
+        self.assertIn("score", trace_entry)
+        self.assertIn("components", trace_entry)
 
     @unittest.skipUnless(shutil.which("go"), "go toolchain required")
     def test_benchmarks_run(self) -> None:

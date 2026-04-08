@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import math
 
-SCORE_MIN = 0.1
-SCORE_MAX = 0.9
+SCORE_MIN = 0.0
+SCORE_MAX = 1.0
 
 
 def normalize_score(value: float | None) -> float:

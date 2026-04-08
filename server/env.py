@@ -147,6 +147,16 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
         observation.metadata["reward_components"] = reward.components
         observation.delta_baseline = reward.components.get("delta_vs_baseline")
         observation.delta_prev_best = reward.components.get("delta_vs_prev_best")
+        if self._state.reward_trace is None:
+            self._state.reward_trace = []
+        self._state.reward_trace.append(
+            {
+                "step": self._state.step_count,
+                "action_type": action.action_type,
+                "score": observation.reward,
+                "components": reward.components,
+            }
+        )
 
         # Auto-revert on failure, negative reward, or regression vs prev-best if a patch was applied
         if getattr(self._state, "last_patch_files", None):
@@ -183,7 +193,7 @@ class GoPerfEnvironment(Environment[GoPerfAction, GoPerfObservation, GoPerfState
             and self._state.budget_remaining <= 0
         ):
             observation.done = True
-        # Score is clamped to (0, 1) in the grader; treat the max band as success.
+        # Treat the top score band as success once the patch budget requirement is met.
         if grade.get("score", 0.0) >= 0.9:
             min_patches = task.min_patches if task else 0
             patch_cycles = self._state.patch_cycles or 0
